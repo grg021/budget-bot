@@ -253,10 +253,20 @@ async function main() {
         return tx;
       });
     if (!list.length) continue;
-    const res = await api.importTransactions(accIds.get(accName), list);
-    totalImported += (res.added || []).length;
-    console.log(`${accName}: ${(res.added || []).length} added, ${(res.updated || []).length} updated`);
-    if (res.errors?.length) console.log('  errors:', res.errors);
+    // Import + sync in chunks: one giant final sync (90k+ CRDT messages) blows
+    // past actual-server's request size limit, so push changes incrementally.
+    const CHUNK = 500;
+    let added = 0, updated = 0;
+    for (let i = 0; i < list.length; i += CHUNK) {
+      const res = await api.importTransactions(accIds.get(accName), list.slice(i, i + CHUNK));
+      added += (res.added || []).length;
+      updated += (res.updated || []).length;
+      if (res.errors?.length) console.log('  errors:', res.errors);
+      await api.sync();
+      if (list.length > CHUNK) process.stdout.write(`\r${accName}: ${Math.min(i + CHUNK, list.length)}/${list.length} synced`);
+    }
+    totalImported += added;
+    console.log(`${list.length > CHUNK ? '\n' : ''}${accName}: ${added} added, ${updated} updated`);
   }
   console.log(`imported ${totalImported} transactions`);
 
