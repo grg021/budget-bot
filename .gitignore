@@ -1,0 +1,8 @@
+# secrets — never commit
+.env
+
+# financial data — never commit
+import/
+
+node_modules/
+*.log
