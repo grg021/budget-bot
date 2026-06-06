@@ -22,23 +22,25 @@ function getHistory(userId) {
   return session.messages;
 }
 
+const hasBlock = (m, type) => Array.isArray(m.content) && m.content.some((b) => b.type === type);
+
 function saveHistory(userId, messages) {
   const valid = [...messages];
 
-  // Anthropic requires history to end with an assistant message and start
-  // with a user message. Trim any trailing tool-result user messages that
-  // can accumulate when the loop hits its max-turn limit mid-tool-use.
-  while (valid.length > 0 && valid[valid.length - 1].role !== 'assistant') {
+  // Anthropic requires history to start with a user message and end with a
+  // complete assistant turn. Drop trailing messages until we land on an
+  // assistant turn with no unanswered tool_use — that rejects both the
+  // tool-result user messages the loop leaves on its max-turn limit and the
+  // dangling tool_use that would otherwise sit unanswered before the next turn.
+  while (valid.length > 0 && (valid[valid.length - 1].role !== 'assistant' || hasBlock(valid[valid.length - 1], 'tool_use'))) {
     valid.pop();
-  }
-  while (valid.length > 0 && valid[0].role !== 'user') {
-    valid.shift();
   }
 
   let trimmed = valid.slice(-MAX_HISTORY_MESSAGES);
 
-  // After slicing, the first entry might be an assistant message; drop it.
-  if (trimmed.length > 0 && trimmed[0].role !== 'user') {
+  // Drop leading messages until the first is a plain user message — slicing can
+  // expose an assistant turn or a tool_result whose paired tool_use was cut off.
+  while (trimmed.length > 0 && (trimmed[0].role !== 'user' || hasBlock(trimmed[0], 'tool_result'))) {
     trimmed = trimmed.slice(1);
   }
 
