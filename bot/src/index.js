@@ -6,8 +6,8 @@ import { parseMessage, NEEDS_REVIEW } from './llm.js';
 const CUR = process.env.CURRENCY_SYMBOL || '₱';
 const UNDO_FILE = '/data/undo.json';
 const UNDO_WINDOW_MS = 48 * 60 * 60 * 1000;
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes of inactivity clears context
-const MAX_HISTORY_MESSAGES = 20; // cap stored message objects to bound token usage
+const SESSION_TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes of inactivity clears context
+const MAX_HISTORY_MESSAGES = 6;             // last 3 exchanges (user+assistant pairs)
 
 // ---- conversation session store ---------------------------------------
 const sessions = new Map(); // userId -> { messages, lastActive }
@@ -174,7 +174,13 @@ bot.on('message:text', async (ctx) => {
       today: actual.todayISO(),
       executeTool,
     });
-    saveHistory(ctx.from.id, messages);
+    // Keep context only when the bot is mid-clarification (no tool fired yet).
+    // Once an action completes, clear history so the next message starts fresh.
+    if (confirmations.length > 0) {
+      sessions.delete(ctx.from.id);
+    } else {
+      saveHistory(ctx.from.id, messages);
+    }
 
     // Deterministic confirmations win over the model's own phrasing.
     await ctx.reply(confirmations.length ? confirmations.join('\n') : reply || 'Hmm, I had trouble with that one.');
