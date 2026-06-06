@@ -195,21 +195,33 @@ async function main() {
   for (const label of balances.keys()) labels.add(label);
 
   console.log('\n--- Applying to Actual ---');
-  // Debug shim: @actual-app/api wraps fetch failures in PostError('network-failure'),
-  // hiding the real cause. Log it before the wrapper eats it.
+  // Replace fetch with a plain node:http client for the Actual server:
+  // undici's pooled keep-alive sockets die against this server (EPIPE /
+  // UND_ERR_SOCKET on sync POSTs). agent:false = fresh connection per request.
+  const { default: http } = await import('node:http');
   const origFetch = globalThis.fetch.bind(globalThis);
-  globalThis.fetch = async (input, init) => {
-    try {
-      return await origFetch(input, init);
-    } catch (e) {
-      console.error(
-        '[fetch-debug]',
-        String(input).slice(0, 100),
-        'bodyBytes:', init?.body?.byteLength ?? init?.body?.length ?? 0,
-        'cause:', e.cause?.code || e.cause?.message || e.message,
+  globalThis.fetch = (input, init = {}) => {
+    const urlStr = typeof input === 'string' ? input : input.url;
+    if (!urlStr.startsWith('http://')) return origFetch(input, init);
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        urlStr,
+        { method: init.method || 'GET', headers: init.headers || {}, agent: false },
+        (res) => {
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () =>
+            resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })),
+          );
+        },
       );
-      throw e;
-    }
+      req.on('error', (e) => {
+        console.error('[http-debug]', new URL(urlStr).pathname, 'error:', e.code || e.message);
+        reject(new TypeError('fetch failed', { cause: e }));
+      });
+      if (init.body) req.write(Buffer.from(init.body));
+      req.end();
+    });
   };
   const actual = await import('../src/actual.js');
   const api = await actual.open();
