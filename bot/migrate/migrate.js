@@ -195,6 +195,22 @@ async function main() {
   for (const label of balances.keys()) labels.add(label);
 
   console.log('\n--- Applying to Actual ---');
+  // Debug shim: @actual-app/api wraps fetch failures in PostError('network-failure'),
+  // hiding the real cause. Log it before the wrapper eats it.
+  const origFetch = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = async (input, init) => {
+    try {
+      return await origFetch(input, init);
+    } catch (e) {
+      console.error(
+        '[fetch-debug]',
+        String(input).slice(0, 100),
+        'bodyBytes:', init?.body?.byteLength ?? init?.body?.length ?? 0,
+        'cause:', e.cause?.code || e.cause?.message || e.message,
+      );
+      throw e;
+    }
+  };
   const actual = await import('../src/actual.js');
   const api = await actual.open();
   const toInt = api.utils.amountToInteger;
