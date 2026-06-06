@@ -23,8 +23,28 @@ function getHistory(userId) {
 }
 
 function saveHistory(userId, messages) {
-  const trimmed = messages.slice(-MAX_HISTORY_MESSAGES);
-  sessions.set(userId, { messages: trimmed, lastActive: Date.now() });
+  const valid = [...messages];
+
+  // Anthropic requires history to end with an assistant message and start
+  // with a user message. Trim any trailing tool-result user messages that
+  // can accumulate when the loop hits its max-turn limit mid-tool-use.
+  while (valid.length > 0 && valid[valid.length - 1].role !== 'assistant') {
+    valid.pop();
+  }
+  while (valid.length > 0 && valid[0].role !== 'user') {
+    valid.shift();
+  }
+
+  let trimmed = valid.slice(-MAX_HISTORY_MESSAGES);
+
+  // After slicing, the first entry might be an assistant message; drop it.
+  if (trimmed.length > 0 && trimmed[0].role !== 'user') {
+    trimmed = trimmed.slice(1);
+  }
+
+  if (trimmed.length > 0) {
+    sessions.set(userId, { messages: trimmed, lastActive: Date.now() });
+  }
 }
 
 const allowed = new Set(
