@@ -6,6 +6,48 @@ import { parseMessage, NEEDS_REVIEW } from './llm.js';
 const CUR = process.env.CURRENCY_SYMBOL || '₱';
 const UNDO_FILE = '/data/undo.json';
 const UNDO_WINDOW_MS = 48 * 60 * 60 * 1000;
+const SESSION_TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes of inactivity clears context
+const MAX_HISTORY_MESSAGES = 6;             // last 3 exchanges (user+assistant pairs)
+
+// ---- conversation session store ---------------------------------------
+const sessions = new Map(); // userId -> { messages, lastActive }
+
+function getHistory(userId) {
+  const session = sessions.get(userId);
+  if (!session) return [];
+  if (Date.now() - session.lastActive > SESSION_TIMEOUT_MS) {
+    sessions.delete(userId);
+    return [];
+  }
+  return session.messages;
+}
+
+const hasBlock = (m, type) => Array.isArray(m.content) && m.content.some((b) => b.type === type);
+
+function saveHistory(userId, messages) {
+  const valid = [...messages];
+
+  // Anthropic requires history to start with a user message and end with a
+  // complete assistant turn. Drop trailing messages until we land on an
+  // assistant turn with no unanswered tool_use — that rejects both the
+  // tool-result user messages the loop leaves on its max-turn limit and the
+  // dangling tool_use that would otherwise sit unanswered before the next turn.
+  while (valid.length > 0 && (valid[valid.length - 1].role !== 'assistant' || hasBlock(valid[valid.length - 1], 'tool_use'))) {
+    valid.pop();
+  }
+
+  let trimmed = valid.slice(-MAX_HISTORY_MESSAGES);
+
+  // Drop leading messages until the first is a plain user message — slicing can
+  // expose an assistant turn or a tool_result whose paired tool_use was cut off.
+  while (trimmed.length > 0 && (trimmed[0].role !== 'user' || hasBlock(trimmed[0], 'tool_result'))) {
+    trimmed = trimmed.slice(1);
+  }
+
+  if (trimmed.length > 0) {
+    sessions.set(userId, { messages: trimmed, lastActive: Date.now() });
+  }
+}
 
 const allowed = new Set(
   (process.env.ALLOWED_TELEGRAM_IDS || '')
@@ -145,13 +187,22 @@ bot.on('message:text', async (ctx) => {
       return 'Unknown tool';
     };
 
-    const reply = await parseMessage({
+    const history = getHistory(ctx.from.id);
+    const { reply, messages } = await parseMessage({
       text,
+      history,
       categoryLabels: spendCats.map((c) => c.label),
       accountNames: accounts.map((a) => a.name),
       today: actual.todayISO(),
       executeTool,
     });
+    // Keep context only when the bot is mid-clarification (no tool fired yet).
+    // Once an action completes, clear history so the next message starts fresh.
+    if (confirmations.length > 0) {
+      sessions.delete(ctx.from.id);
+    } else {
+      saveHistory(ctx.from.id, messages);
+    }
 
     // Deterministic confirmations win over the model's own phrasing.
     await ctx.reply(confirmations.length ? confirmations.join('\n') : reply || 'Hmm, I had trouble with that one.');
