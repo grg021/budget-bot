@@ -244,6 +244,7 @@ async function main() {
     if (!accIds.has(name))
       accIds.set(name, await api.createAccount({ name, type: name === CATCHALL_ACCOUNT ? 'checking' : accountType(name) }, 0));
   }
+  await api.sync(); // flush category/account creation as its own small batch
 
   // 3. Transactions (imported_id makes reruns idempotent).
   let totalImported = 0;
@@ -269,9 +270,10 @@ async function main() {
         return tx;
       });
     if (!list.length) continue;
-    // Import + sync in chunks: one giant final sync (90k+ CRDT messages) blows
-    // past actual-server's request size limit, so push changes incrementally.
-    const CHUNK = 500;
+    // Import + sync in small chunks: the server aborts /sync/sync bodies over
+    // ~100KB (EPIPE mid-upload), so keep each sync batch well under that.
+    // ~10 CRDT messages per transaction at ~135 bytes each -> 30 txns ≈ 40KB.
+    const CHUNK = 30;
     let added = 0, updated = 0;
     for (let i = 0; i < list.length; i += CHUNK) {
       const res = await api.importTransactions(accIds.get(accName), list.slice(i, i + CHUNK));
