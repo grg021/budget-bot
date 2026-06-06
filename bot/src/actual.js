@@ -1,6 +1,34 @@
 // Thin wrapper around @actual-app/api shared by the bot and the migration script.
-import api from '@actual-app/api';
+import http from 'node:http';
 import fs from 'node:fs';
+
+// undici's pooled keep-alive sockets get closed by actual-server between
+// requests, causing EPIPE / UND_ERR_SOCKET on sync POSTs. Replace fetch with
+// a plain node:http client (agent:false = fresh connection per request) for
+// http:// URLs. Must be installed before @actual-app/api captures fetch.
+const origFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (input, init = {}) => {
+  const urlStr = typeof input === 'string' ? input : input.url;
+  if (!urlStr.startsWith('http://')) return origFetch(input, init);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      urlStr,
+      { method: init.method || 'GET', headers: init.headers || {}, agent: false },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () =>
+          resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })),
+        );
+      },
+    );
+    req.on('error', (e) => reject(new TypeError('fetch failed', { cause: e })));
+    if (init.body) req.write(Buffer.from(init.body));
+    req.end();
+  });
+};
+
+const { default: api } = await import('@actual-app/api');
 
 const DATA_DIR = process.env.ACTUAL_DATA_DIR || '/data/actual-cache';
 
