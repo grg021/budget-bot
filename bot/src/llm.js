@@ -46,7 +46,7 @@ export function buildTools(categoryLabels, accountNames) {
   ];
 }
 
-export async function parseMessage({ text, categoryLabels, accountNames, today, executeTool }) {
+export async function parseMessage({ text, history = [], categoryLabels, accountNames, today, executeTool }) {
   const tools = buildTools(categoryLabels, accountNames);
   const system = [
     `You are a household envelope-budgeting assistant for a family in the Philippines. Today is ${today}.`,
@@ -57,7 +57,7 @@ export async function parseMessage({ text, categoryLabels, accountNames, today, 
     `Keep all text replies to one or two short sentences.`,
   ].join('\n');
 
-  const messages = [{ role: 'user', content: text }];
+  const messages = [...history, { role: 'user', content: text }];
   let reply = null;
 
   for (let turn = 0; turn < 3; turn++) {
@@ -73,6 +73,7 @@ export async function parseMessage({ text, categoryLabels, accountNames, today, 
     const textBlocks = resp.content.filter((b) => b.type === 'text');
 
     if (toolUses.length === 0) {
+      messages.push({ role: 'assistant', content: resp.content });
       reply = textBlocks.map((b) => b.text).join('\n').trim();
       break;
     }
@@ -90,5 +91,5 @@ export async function parseMessage({ text, categoryLabels, accountNames, today, 
       break;
     }
   }
-  return reply;
+  return { reply, messages };
 }

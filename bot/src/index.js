@@ -6,6 +6,26 @@ import { parseMessage, NEEDS_REVIEW } from './llm.js';
 const CUR = process.env.CURRENCY_SYMBOL || '₱';
 const UNDO_FILE = '/data/undo.json';
 const UNDO_WINDOW_MS = 48 * 60 * 60 * 1000;
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes of inactivity clears context
+const MAX_HISTORY_MESSAGES = 20; // cap stored message objects to bound token usage
+
+// ---- conversation session store ---------------------------------------
+const sessions = new Map(); // userId -> { messages, lastActive }
+
+function getHistory(userId) {
+  const session = sessions.get(userId);
+  if (!session) return [];
+  if (Date.now() - session.lastActive > SESSION_TIMEOUT_MS) {
+    sessions.delete(userId);
+    return [];
+  }
+  return session.messages;
+}
+
+function saveHistory(userId, messages) {
+  const trimmed = messages.slice(-MAX_HISTORY_MESSAGES);
+  sessions.set(userId, { messages: trimmed, lastActive: Date.now() });
+}
 
 const allowed = new Set(
   (process.env.ALLOWED_TELEGRAM_IDS || '')
@@ -145,13 +165,16 @@ bot.on('message:text', async (ctx) => {
       return 'Unknown tool';
     };
 
-    const reply = await parseMessage({
+    const history = getHistory(ctx.from.id);
+    const { reply, messages } = await parseMessage({
       text,
+      history,
       categoryLabels: spendCats.map((c) => c.label),
       accountNames: accounts.map((a) => a.name),
       today: actual.todayISO(),
       executeTool,
     });
+    saveHistory(ctx.from.id, messages);
 
     // Deterministic confirmations win over the model's own phrasing.
     await ctx.reply(confirmations.length ? confirmations.join('\n') : reply || 'Hmm, I had trouble with that one.');
