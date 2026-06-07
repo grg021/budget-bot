@@ -147,7 +147,7 @@ bot.on('message:text', async (ctx) => {
       if (name === 'log_expense') {
         // The amount originates from free-text via the model; guard against
         // NaN, non-positive (would flip an expense into income), and absurd values.
-        if (!Number.isFinite(input.amount) || input.amount <= 0 || input.amount > 10_000_000) {
+        if (!input || !Number.isFinite(input.amount) || input.amount <= 0 || input.amount > 10_000_000) {
           return 'Error: that amount doesn’t look right — please restate it.';
         }
         const label = byLabel.has(input.category) ? input.category : NEEDS_REVIEW;

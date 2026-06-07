@@ -9,7 +9,8 @@ COPY src ./src
 COPY migrate ./migrate
 ENV NODE_ENV=production
 # Run unprivileged. The node:22 image ships a non-root `node` user (uid 1000);
-# pre-create /data so a fresh bot-data volume inherits node ownership.
-RUN mkdir -p /data && chown -R node:node /data /app
+# pre-create /data so a fresh bot-data volume inherits node ownership. /app stays
+# root-owned (read-only to node) so a compromised process can't rewrite the source.
+RUN mkdir -p /data && chown -R node:node /data
 USER node
 CMD ["node", "src/index.js"]
