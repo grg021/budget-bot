@@ -145,6 +145,11 @@ bot.on('message:text', async (ctx) => {
 
     const executeTool = async (name, input) => {
       if (name === 'log_expense') {
+        // The amount originates from free-text via the model; guard against
+        // NaN, non-positive (would flip an expense into income), and absurd values.
+        if (!input || !Number.isFinite(input.amount) || input.amount <= 0 || input.amount > 10_000_000) {
+          return 'Error: that amount doesn’t look right — please restate it.';
+        }
         const label = byLabel.has(input.category) ? input.category : NEEDS_REVIEW;
         const cat = byLabel.get(label);
         if (!cat) return 'Error: category not found (is the Needs Review envelope set up?)';
@@ -208,7 +213,7 @@ bot.on('message:text', async (ctx) => {
     await ctx.reply(confirmations.length ? confirmations.join('\n') : reply || 'Hmm, I had trouble with that one.');
   } catch (err) {
     console.error(err);
-    await ctx.reply(`Something went wrong: ${err.message}`);
+    await ctx.reply('Something went wrong — please try again.');
   }
 });
 
