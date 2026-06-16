@@ -43,6 +43,17 @@ export function buildTools(categoryLabels, accountNames) {
         required: ['category'],
       },
     },
+    {
+      name: 'get_recent_transactions',
+      description:
+        'List the most recent transactions in the budget. Use for requests about recent / latest / last few transactions or activity.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: 'How many to show, default 5' },
+        },
+      },
+    },
   ];
 }
 

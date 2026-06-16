@@ -150,6 +150,43 @@ export async function logExpense({ accountId, categoryId, payee, amountSpent, da
   return Array.isArray(ids) ? ids[0] : ids;
 }
 
+// Returns the n most recent transactions across all open accounts, newest
+// first: [{ id, date, payee, label, amount }] with amount in major units
+// (negative = spent). Looks back 90 days to avoid scanning migration history.
+export async function recentTransactions(n = 5) {
+  await freshen();
+  const accounts = await api.getAccounts();
+  const open = accounts.filter((a) => !a.closed);
+
+  const end = todayISO();
+  const start = (() => {
+    const d = new Date(`${end}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 90);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  })();
+
+  const payees = await api.getPayees();
+  const payeeName = new Map(payees.map((p) => [p.id, p.name]));
+  const categories = await listCategories();
+  const catLabel = new Map(categories.map((c) => [c.id, c.label]));
+
+  const all = [];
+  for (const a of open) {
+    const txns = await api.getTransactions(a.id, start, end);
+    all.push(...txns);
+  }
+
+  all.sort((x, y) => (y.date < x.date ? -1 : y.date > x.date ? 1 : (y.sort_order ?? 0) - (x.sort_order ?? 0)));
+
+  return all.slice(0, n).map((t) => ({
+    id: t.id,
+    date: t.date,
+    payee: t.payee_name || payeeName.get(t.payee) || 'Unknown',
+    label: catLabel.get(t.category) || 'Uncategorized',
+    amount: api.utils.integerToAmount(t.amount ?? 0),
+  }));
+}
+
 export async function deleteTransaction(id) {
   await open();
   await api.deleteTransaction(id);

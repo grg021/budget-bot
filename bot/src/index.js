@@ -60,6 +60,13 @@ const allowed = new Set(
 const fmt = (n) =>
   `${CUR}${Math.abs(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// "2026-06-16" -> "Jun 16" without going through Date (avoids tz surprises).
+const fmtDate = (iso) => {
+  const [, m, d] = iso.split('-');
+  return `${MONTHS[Number(m) - 1]} ${Number(d)}`;
+};
+
 // ---- undo store -------------------------------------------------------
 function loadUndo() {
   try {
@@ -100,6 +107,7 @@ bot.command('start', (ctx) =>
       '"Spent 1,500 at SM Supermarket for groceries"\n\n' +
       'You can also ask:\n' +
       '"How much is left in Groceries?"\n' +
+      '"Recent transactions" — your last few entries\n' +
       '/balances — all envelopes\n' +
       'undo #ID — remove a logged entry',
   ),
@@ -188,6 +196,20 @@ bot.on('message:text', async (ctx) => {
         return name === 'get_balance'
           ? `${input.category}: budgeted ${fmt(s.budgeted)}, spent ${fmt(s.spent)}, remaining ${s.balance < 0 ? '-' : ''}${fmt(s.balance)}`
           : `${input.category}: spent ${fmt(s.spent)} so far this month.`;
+      }
+      if (name === 'get_recent_transactions') {
+        const limit = Math.min(Math.max(Math.trunc(input?.limit) || 5, 1), 10);
+        const txns = await actual.recentTransactions(limit);
+        if (!txns.length) return 'No recent transactions.';
+        // Reverse the undo map so bot-created rows can be undone from the list.
+        const undoByTx = new Map();
+        for (const [code, entry] of Object.entries(loadUndo())) undoByTx.set(entry.txId, code);
+        const lines = txns.map((t) => {
+          const tag = undoByTx.has(t.id) ? ` [#${undoByTx.get(t.id)}]` : '';
+          const money = t.amount > 0 ? `+${fmt(t.amount)}` : fmt(t.amount);
+          return `${fmtDate(t.date)} · ${money} · ${t.payee} → ${t.label}${tag}`;
+        });
+        return `Recent transactions:\n${lines.join('\n')}`;
       }
       return 'Unknown tool';
     };
