@@ -70,9 +70,12 @@ only public surface, behind Caddy on 80/443 using `DOMAIN` from `.env`.
 
 ## Gotchas / hard-won lessons
 
-1. Keep `@actual-app/api` ("latest") in lockstep with the actual-server image —
-   version skew causes "Database is out of sync with migrations" on
-   downloadBudget. When pulling a new server image, rebuild the bot.
+1. Keep `@actual-app/api` (`bot/package.json`) in lockstep with the actual-server
+   image tag (`docker-compose.yml`) — both are pinned to the SAME version
+   (currently 26.6.0). Version skew causes "Database is out of sync with
+   migrations" on downloadBudget: a `:latest` server silently migrates the DB
+   past the bot's pinned API. To upgrade, bump both to the same new version
+   together, regenerate `bot/package-lock.json`, then rebuild the bot.
 2. Never remove the fetch shim in `bot/src/actual.js` (see above).
 3. Sync payloads must stay small; if bulk-writing transactions, sync every few
    hundred messages (see migrate.js chunking).
