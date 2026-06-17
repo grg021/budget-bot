@@ -1,6 +1,9 @@
 services:
   actual_server:
-    image: docker.io/actualbudget/actual-server:latest
+    # Pinned in lockstep with bot's @actual-app/api (bot/package.json). A :latest
+    # server drifts ahead and migrates the DB past the bot's API, breaking
+    # downloadBudget with out-of-sync-migrations. Bump both together.
+    image: docker.io/actualbudget/actual-server:26.6.0
     restart: unless-stopped
     environment:
       # the one-time migration sync (~93k messages) exceeds the ~20MB defaults
