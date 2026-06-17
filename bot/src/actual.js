@@ -150,6 +150,44 @@ export async function logExpense({ accountId, categoryId, payee, amountSpent, da
   return Array.isArray(ids) ? ids[0] : ids;
 }
 
+// Returns the n most recent transactions across all open accounts, newest
+// first: [{ id, date, payee, label, amount }] with amount in major units
+// (negative = spent). Looks back 90 days to avoid scanning migration history.
+export async function recentTransactions(n = 5) {
+  await freshen();
+  const accounts = await api.getAccounts();
+  const open = accounts.filter((a) => !a.closed);
+
+  const end = todayISO();
+  const start = (() => {
+    const d = new Date(`${end}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 90);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  })();
+
+  // Fetch metadata and per-account transactions concurrently. The fetch shim
+  // uses agent:false (a fresh socket per request, no pool), so parallel reads
+  // are independent — this is just GETs, not the sync POSTs that must stay small.
+  const [payees, categories, ...txnsArrays] = await Promise.all([
+    api.getPayees(),
+    listCategories(),
+    ...open.map((a) => api.getTransactions(a.id, start, end)),
+  ]);
+  const payeeName = new Map(payees.map((p) => [p.id, p.name]));
+  const catLabel = new Map(categories.map((c) => [c.id, c.label]));
+
+  const all = txnsArrays.flat();
+  all.sort((x, y) => y.date.localeCompare(x.date) || (y.sort_order ?? 0) - (x.sort_order ?? 0));
+
+  return all.slice(0, n).map((t) => ({
+    id: t.id,
+    date: t.date,
+    payee: t.payee_name || payeeName.get(t.payee) || 'Unknown',
+    label: catLabel.get(t.category) || 'Uncategorized',
+    amount: api.utils.integerToAmount(t.amount ?? 0),
+  }));
+}
+
 export async function deleteTransaction(id) {
   await open();
   await api.deleteTransaction(id);
